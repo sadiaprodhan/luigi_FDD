@@ -1,0 +1,65 @@
+name: Time Series Analysis Preprocessing
+description: Fault detection timeseries analysis preprocessing different datasets with different feature engineering
+pipeline:
+  - task: check_dataset
+    id: dataset 
+    input_id: input
+    parameters: 
+      input_format: csv 
+      output_format: csv 
+  - task: calculate_lags 
+    id: lags 
+    input_id: dataset   
+    parameters:
+      lags_size: [60,1440]
+      target_column: Fault Detection Ground Truth
+  - task: calculate_rolling_window 
+    id: rolling_window 
+    input_id: lags   
+    parameters:
+      start: 60
+      window_size: 1440
+      target_column: Fault Detection Ground Truth
+  - task: calculate_hours_of_day 
+    id: hours_day 
+    input_id: rolling_window   
+    parameters:
+      hour_column: hours_of_day
+  - task: calculate_sine_cosaine 
+    id: sine_cosaine 
+    input_id: hours_day   
+    parameters:
+      hour_column: hours_of_day
+      sine_column: hour_sine
+      cos_column: hour_cos
+  - task: attribute_adder
+    id: attributeaddr 
+    input_id: sine_cosaine   
+    parameters:
+      target_column: Fault Detection Ground Truth
+      test_number: 3
+  - task: imputer
+    id: impute
+    input_id: attributeaddr   
+    parameters:
+      strategy: median
+  
+  - task: standard_scaler
+    id: standardscaler
+    input_id: impute   
+    parameters:
+      target_column: Fault Detection Ground Truth
+  - task: pca
+    id: pca
+    input_id: standardscaler
+    parameters: 
+      target_column: Fault Detection Ground Truth
+      n_components: 3
+      reduction: 1
+ 
+  
+
+
+  
+ 
+  

@@ -1,0 +1,29 @@
+name: Time Series Analysis Classification pipelines
+description: Do classification with preprocessed dataset
+pipeline:
+  - task: time_series_split
+    id: time_series_split
+    input_id: input
+    parameters: 
+      important_feature: "AHU: Heating Coil Valve Control Signal" 
+      target_column: Fault Detection Ground Truth
+  - task: lstm
+    id: lstm
+    input_id: time_series_split
+    parameters: 
+      expected_file_name: expected
+      predicted_file_name: predicted
+      file_format: csv
+
+
+  - task: evaluation
+    id: eval
+    input_id: lstm
+    parameters: 
+      eval_file_name: evaluation
+      file_format: csv
+      expected_file_name: expected
+      predicted_file_name: predicted
+      continuous: 0
+      threshold: 0.5
+
