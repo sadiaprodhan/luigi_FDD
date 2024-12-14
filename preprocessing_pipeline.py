@@ -127,19 +127,7 @@ class calculateSineCosaineHour(OneToOneTask):
 		df[sine_column] = np.sin(df[hour_column] / 24 * 2 * np.pi)
 		df[cosaine_column] = np.cos(df[hour_column] / 24.0 * 2 * np.pi)
 		self.convert_df_to_csv(df)
-class calculateMinMaxScaler(OneToOneTask):
-	def requires(self):
-		return checkDataset(input_file=self.input_file, output_file=self.output_file, params=self.params)
 
-	def output(self):
-		return luigi.LocalTarget(self.output_file)	
-	def run(self):
-		print("Inside minmax scaler ")
-		df = self.convert_csv_to_df()
-		scaler = MinMaxScaler()
-		numeric_columns = df.select_dtypes(include=[np.number]).columns
-		df[numeric_columns] = scaler.fit_transform(df[numeric_columns])
-		self.convert_df_to_csv(df)
 class attributeAddr(OneToOneTask):
 	def requires(self):
 		return checkDataset(input_file=self.input_file, output_file=self.output_file, params=self.params)
@@ -293,7 +281,6 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		'calculate_rolling_window': calculateRollingWindow,
 		'calculate_hours_of_day': calculateHoursofDay,
 		'calculate_sine_cosaine': calculateSineCosaineHour,
-		'minmaxscaler': calculateMinMaxScaler,
 		'attribute_adder': attributeAddr,
 		'standard_scaler': transformStandardScaler,
 		'imputer': fillMissingValuesImputer,
@@ -308,7 +295,6 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		'calculate_rolling_window': ['csv', 'csv'],
 		'calculate_hours_of_day': ['csv', 'csv'],
 		'calculate_sine_cosaine': ['csv', 'csv'],
-		'minmaxscaler': ['csv', 'csv'],
 		'attribute_adder':  ['csv', 'csv'],
 		'standard_scaler': ['csv', 'csv'],
 		'imputer': ['csv', 'csv'],
