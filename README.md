@@ -9,7 +9,7 @@
 ## Instructions
 
 ###  Luigi
-All the datasets, pre-processed dataset and configuration files for both preprocessing pipeline and classification pipeline are given here:  [google drive link](https://drive.google.com/drive/folders/1qmR-28G64zJOxQRX7RNLIpBw2aJX226f?usp=sharing). The Nine Feature Engineering Configuraiton are given seperately as yaml file. The configuration with ARIMA, LSTM, Random Forest and Fully Connected Neural Network is also provided here.
+All the datasets, pre-processed dataset and configuration files for both preprocessing pipeline and classification pipeline are given [here:](https://drive.google.com/drive/folders/1qmR-28G64zJOxQRX7RNLIpBw2aJX226f?usp=sharing). The Nine Feature Engineering Configuraiton are given seperately as yaml file. The configuration with ARIMA, LSTM, Random Forest and Fully Connected Neural Network is also provided here.
 Luigi is an open-source Python framework designed for building and managing complex pipelines for data processing, workflow automation, and task scheduling. To learn more about Luigi, please refer to the official documentation: [Luigi Documentation](https://luigi.readthedocs.io/en/stable/).
 
 To initiate the Luigi scheduler, execute the following command in your terminal:
@@ -58,3 +58,4 @@ python .\classification_pipeline.py -I classification_input_dir -O classificatio
 ```
 
 The evaluation result data will be located within the output directory, organized under a subdirectory named 'evaluation' after all the task has been executed in the classification pipeline. 
+All the results can be found here: [Results](https://docs.google.com/spreadsheets/d/1pfSeX75oETUIkqYpVOtlHOQoISO7uIawE_mOFOnLXKA/edit?usp=sharing)
