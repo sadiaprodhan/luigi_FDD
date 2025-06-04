@@ -1,24 +1,23 @@
 name: Time Series Analysis Classification pipelines
 description: Do classification with preprocessed dataset
 pipeline:
-  - task: time_series_split
-    id: time_series_split
+  - task: stratified_split
+    id: strat_split
     input_id: input
     parameters: 
-      important_feature: "AHU: Heating Coil Valve Control Signal" 
+      important_feature: "AHU: Supply Air Temperature"  
       target_column: Fault Detection Ground Truth
-  - task: lstm
-    id: lstm
-    input_id: time_series_split
+  - task: fullyConnectedNN
+    id: fullyConnectedNN
+    input_id: strat_split
     parameters: 
-      expected_file_name: expected
-      predicted_file_name: predicted
-      file_format: csv
-
-
+      expected_file_name: "expected"
+      predicted_file_name: "predicted"
+      file_format: "csv"
+      hidden_neurons: 30
   - task: evaluation
     id: eval
-    input_id: lstm
+    input_id: fullyConnectedNN
     parameters: 
       eval_file_name: evaluation
       file_format: csv
@@ -26,4 +25,6 @@ pipeline:
       predicted_file_name: predicted
       continuous: 0
       threshold: 0.5
+
+
 

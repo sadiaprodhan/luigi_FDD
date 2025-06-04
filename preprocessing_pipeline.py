@@ -10,6 +10,36 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import OneHotEncoder
 
+class File(luigi.ExternalTask):
+	file = luigi.Parameter()
+
+	def output(self):
+		return luigi.LocalTarget(self.file)
+
+
+class OneToOneTask(luigi.Task):
+	input_file = luigi.Parameter() 
+	output_file = luigi.Parameter() 
+	params = luigi.DictParameter() 
+	print(params)
+	def convert_csv_to_df(self):
+		df = pd.read_csv(self.input().path, index_col="Datetime", parse_dates=True)
+		return df
+	def convert_df_to_csv(self,dataframe):
+		dataframe.to_csv(self.output().path, index = True)
+	def find_important_feature(self,df, target_column):
+		Correlation_matrix = df.corr().loc[target_column].sort_values(ascending = False)
+		important_feature = Correlation_matrix.index[1]
+		return important_feature
+	def run(self):
+		pass 
+
+	def get_input_format(self):
+		pass 
+
+	def get_output_format(self):
+		pass 
+
 
 
 
@@ -234,6 +264,30 @@ class fillMissingValuesImputer(OneToOneTask):
 
 		self.convert_df_to_csv(result_df)
 
+class divideDatasetIntoModes(OneToOneTask):
+	def requires(self):
+		return checkDataset(input_file=self.input_file, output_file=self.output_file, params=self.params)
+
+	def output(self):
+			output_files = {}
+			file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
+			output_files[f'heating_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_heating_mode.csv"))
+			output_files[f'cooling_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_cooling_mode.csv"))
+			return output_files
+	def run(self):
+		print("Inside dividing dataset")
+		df = self.convert_csv_to_df()
+		cooling_mode = df[(df['AHU: Outdoor Air Temperature'] > df['AHU: Supply Air Temperature']) & 
+                          (df['AHU: Outdoor Air Temperature'] > df['AHU: Supply Air Temperature Set Point'])]
+		heating_mode = df[(df['AHU: Outdoor Air Temperature'] < df['AHU: Supply Air Temperature']) & 
+                          (df['AHU: Outdoor Air Temperature'] < df['AHU: Supply Air Temperature Set Point'])]
+
+		output_files = self.output()
+		cooling_mode.to_csv(output_files[f'cooling_mode'].path, index=True)
+		heating_mode.to_csv(output_files[f'heating_mode'].path, index=True)
+
+
+
 class fillMissingValuesbfill(OneToOneTask):
 	def requires(self):
 		return checkDataset(input_file=self.input_file, output_file=self.output_file, params=self.params)
@@ -286,11 +340,14 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		'imputer': fillMissingValuesImputer,
 		'bfill': fillMissingValuesbfill,
 		'pca' : doPca,
-		'one_hot_encoding' : doOneHotEncoding
+		'one_hot_encoding' : doOneHotEncoding,
+		'divide_dataset_into_modes': divideDatasetIntoModes
 
 
 	}
+
 	task_mapping = {
+		'check_dataset':['csv', 'csv'],
 		'calculate_lags': ['csv', 'csv'],
 		'calculate_rolling_window': ['csv', 'csv'],
 		'calculate_hours_of_day': ['csv', 'csv'],
@@ -300,7 +357,8 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		'imputer': ['csv', 'csv'],
 		'bfill': ['csv', 'csv'],
 		'pca': ['csv', 'csv'],
-		'one_hot_encoding' : ['csv', 'csv']
+		'one_hot_encoding' : ['csv', 'csv'],
+		'divide_dataset_into_modes': ['csv', 'csv']
 	
 	}
 	
@@ -330,21 +388,34 @@ class PreprocessingPipeline(luigi.WrapperTask):
 			output_files = []
 			for file in input_files:
 				file = os.path.relpath(file, input_dir)
-				file, ext = os.path.splitext(file)
-				file = file + "." + output_format 
-				output_files.append(os.path.join(output_dir, file))
+				directory_name = os.path.dirname(file)
+				
+				output_files.append(os.path.join(output_dir,directory_name))
+				
 			mapping = list(zip(input_files, output_files))
+		
 
 			# Instantiating Tasks
 			pending_tasks = []
-			for input_file, output_file in mapping:
+			if len(input_files) > 1:
 				pending_tasks.append(
-					self.tasks[task_type](
-						input_file=input_file, 
-						output_file=output_file,
-						params=params
-					)
-				)
+                self.tasks[task_type](
+                    input_file=input_files,  # Pass all input files
+                    output_file=output_files,  # Pass all output files
+                    params=params
+                )
+            )
+			else:
+				for input_file, output_file in mapping:
+					print("OUTPUT_FILE", output_file)
+                    
+					pending_tasks.append(
+                    self.tasks[task_type](
+                        input_file=[input_file],  # Wrap in a list
+                        output_file=[output_file],  # Wrap in a list
+                        params=params
+                    )
+                )	
 
 			yield pending_tasks
 
@@ -364,9 +435,7 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		for root, directories, files in os.walk(directory):
 			print(f"Found files: {files} in directory: {root}")
 			for file in files:
-				print(file)
 				filename, ext = os.path.splitext(file)
-				print(filename)
 				ext = ext.strip(".")
 				if ext == file_format:
 					file = os.path.join(root, file)
@@ -374,11 +443,7 @@ class PreprocessingPipeline(luigi.WrapperTask):
 		return target_files
 
 	def get_io_format(self, task):
-		if task['task'] == 'check_dataset':
-			input_format = task['parameters']['input_format']
-			output_format = task['parameters']['output_format']
-		else:
-			input_format, output_format = self.task_mapping[task['task']]
+		input_format, output_format = self.task_mapping[task['task']]
 		return input_format, output_format
 	def parse_config(self):
 		with open(self.config, 'r') as f:

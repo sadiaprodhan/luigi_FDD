@@ -3,3 +3,5 @@ output_dir/
 input_dir/
 classification_input_dir/
 classification_output_dir/
+clustering_input_dir/
+clustering_output_dir/

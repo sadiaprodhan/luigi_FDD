@@ -1,0 +1,21 @@
+name: Clustering
+description: Clustering with optics
+pipeline:
+  - task: cluster_optics
+    id: optics 
+    input_id: input
+    parameters: 
+      min_points: 112
+      label_col: Label
+      sublabel_col: SubLabel
+      eps_thresold: 0.97
+  - task: analysis
+    id: analysis 
+    input_id: optics
+    parameters: 
+      label_col: Label
+      sublabel_col: SubLabel
+  
+
+  
+

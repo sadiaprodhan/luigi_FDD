@@ -526,6 +526,25 @@ class evaluation(OneToOneTask):
 		eval_df = pd.DataFrame(all_metrics)
 		eval_df.to_csv(self.output()[f'{eval}'].path, index = False)
 	
+class divideDatasetIntoModes(OneToOneTask):
+	def requires(self):
+		return [File(file=f) for f in self.input_file]
+
+	def output(self):
+			output_files = {}
+			file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
+			output_files[f'heating_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_heating_mode.csv"))
+			output_files[f'cooling_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_cooling_mode.csv"))
+			return output_files
+	def run(self):
+		print("Inside dividing dataset")
+		df = pd.read_csv(self.input()[0].path, index_col="Datetime", parse_dates=True)
+		cooling_mode = df[(df['AHU: Outdoor Air Temperature'] >= df['AHU: Supply Air Temperature'])]
+		heating_mode = df[(df['AHU: Outdoor Air Temperature'] < df['AHU: Supply Air Temperature'])]
+
+		output_files = self.output()
+		cooling_mode.to_csv(output_files[f'cooling_mode'].path, index=True)
+		heating_mode.to_csv(output_files[f'heating_mode'].path, index=True)
 
 
 
@@ -544,7 +563,8 @@ class ClassificationPipeline(luigi.WrapperTask):
 		'time_series_split' : timeSeriesSplit,
 		'lstm' : lstm,
 		'randomforest' : randomforest,
-		'fullyConnectedNN' : FullyConnectedNN
+		'fullyConnectedNN' : FullyConnectedNN,
+		'divide_dataset_into_modes': divideDatasetIntoModes
 
 	}
 	task_mapping = {
@@ -555,7 +575,8 @@ class ClassificationPipeline(luigi.WrapperTask):
 		'time_series_split' : ['csv', 'csv'],
 		'lstm': ['csv', 'csv'],
 		'randomforest'  : ['csv', 'csv'],
-		'fullyConnectedNN': ['csv', 'csv']
+		'fullyConnectedNN': ['csv', 'csv'],
+		'divide_dataset_into_modes' : ['csv', 'csv']
 		
 	}
 	
