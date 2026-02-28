@@ -25,7 +25,7 @@ class File(luigi.ExternalTask):
 class OneToOneTask(luigi.Task):
 	input_file = luigi.Parameter() 
 	output_file = luigi.Parameter() 
-	params = luigi.DictParameter() 
+	params = luigi.DictParameter(default={}) 
 	print(params)
 	def convert_csv_to_df(self):
 		df = pd.read_csv(self.input().path, index_col="Datetime", parse_dates=True)
@@ -206,7 +206,7 @@ class analysis(OneToOneTask):
 		final_results = pd.DataFrame(results)
 		final_results = final_results.pivot(index=["Fault", "Metric"], columns="Cluster", values="Value")
 		final_results = final_results.reindex(faults, level="Fault")
-		sorted_clusters = sorted(final_results.columns, key=lambda x: int(x.split()[-1]))  # Extract number from "Cluster X"
+		sorted_clusters = sorted(final_results.columns, key=lambda x: int(x.split()[-1]))  
 		final_results = final_results[sorted_clusters]
 		output_files = self.output()
 		sublabel_df.to_csv(output_files[f'sublabel_analysis'].path)

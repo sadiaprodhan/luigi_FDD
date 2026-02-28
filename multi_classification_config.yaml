@@ -1,0 +1,26 @@
+name: Time Series Analysis Multi Classification pipelines
+adescription: Do classification with preprocessed dataset
+pipeline:
+ 
+  - task: randomforest
+    id: randomforest
+    input_id: input
+    parameters: 
+      n_estimators: 478
+      max_depth: 90
+      min_samples_split: 12
+      min_samples_leaf: 6
+      bootstrap: True
+      max_features: auto
+      expected_file_name: expected
+      predicted_file_name: predicted
+      file_format: csv
+
+  - task: evaluation
+    id: eval
+    input_id: input
+    parameters: 
+      eval_file_name: evaluation
+      file_format: csv
+      expected_file_name: expected
+      predicted_file_name: predicted

@@ -1,0 +1,43 @@
+name: Component Level Fault Diagnosis pipelines
+description: Do fault diagnosis
+pipeline:
+- task: BuildBrickTree
+  id: brickTree 
+  input_id: input
+  parameters:
+        
+- task: ExplainSHAP
+  id: shap 
+  input_id: brickTree
+  parameters:
+          normal_label: Unfaulted
+          "confidence_threshold": 0.85
+          "freq_minutes": 1
+          "bg_size": 200
+          "explainer_kind": auto
+          "per_class_n": 1000
+          "sample_method": top_conf
+          "model_stem": fullyConnectedNN
+          "pred_stem": predicted
+          xte_stem: SDAHU_FULL_M_CLASS_X_test
+
+- task: TopKSensorsByFault
+  id: sensors
+  input_id: shap 
+  parameters:
+    normal_label: Unfaulted
+    top_k: 5
+- task: TopComponentsByFaultFromTopSensors
+  id: components
+  input_id: sensors
+  parameters:
+    
+
+
+
+
+
+    
+
+
+

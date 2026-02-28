@@ -27,7 +27,7 @@ class File(luigi.ExternalTask):
 class OneToOneTask(luigi.Task):
 	input_file = luigi.Parameter() 
 	output_file = luigi.Parameter() 
-	params = luigi.DictParameter() 
+	params = luigi.DictParameter(default={}) 
 	print(params)
 	def convert_csv_to_df(self):
 		df = pd.read_csv(self.input().path, index_col="Datetime", parse_dates=True)
@@ -48,135 +48,10 @@ class OneToOneTask(luigi.Task):
 		pass 
 
 
-class stratifiedSplit(OneToOneTask):
-	def requires(self):
-		return [File(file=f) for f in self.input_file]
-	def output(self):
-		output_files = {}
-		file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
-		for fold in range(1, 6): 
-			output_files[f'X_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_train_fold_{fold}.csv"))
-			output_files[f'Y_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_train_fold_{fold}.csv"))
-			output_files[f'X_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_test_fold_{fold}.csv"))
-			output_files[f'Y_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_test_fold_{fold}.csv"))
-		return output_files
-	def run(self):
-		important_feature = self.params['important_feature']
-		target_column = self.params['target_column']
-		df = pd.read_csv(self.input()[0].path, index_col="Datetime", parse_dates=True)
-		if important_feature not in df.columns:
-			correlation_matrix = df.corr().loc[target_column].sort_values(ascending = False)
-			important_feature = correlation_matrix.index[1]
-			print("important feature", important_feature)
-		devise_metric = df[important_feature].mean() / df[important_feature].std()
-		category_count1 = np.int64(df[important_feature].mean() + df[important_feature].std())
-		category_count2 = np.int64(df[important_feature].mean() - df[important_feature].std())
-		df[important_feature + "_cat"] = np.ceil(df[important_feature] / devise_metric)
-		df[important_feature + "_cat"].where(df[important_feature + "_cat"] < category_count1, category_count1, inplace=True)
-		df[important_feature + "_cat"].where(df[important_feature + "_cat"] > category_count2, category_count2, inplace=True)
-		skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-		for fold, (train_index, test_index) in enumerate(skf.split(df, df[important_feature + "_cat"]), start=1):
-			train_dates = df.index[train_index]
-			test_dates = df.index[test_index]
-			strat_train_set = df.loc[train_dates].drop(columns=important_feature + "_cat")
-			strat_test_set = df.loc[test_dates].drop(columns=important_feature + "_cat")
-			X_train = strat_train_set.drop(columns=[target_column])
-			Y_train = strat_train_set[target_column]
-			X_test = strat_test_set.drop(columns=[target_column])
-			Y_test = strat_test_set[target_column]
-			output_files = self.output()
-			X_train.to_csv(output_files[f'X_train_fold_{fold}'].path, index=True)
-			Y_train.to_csv(output_files[f'Y_train_fold_{fold}'].path, index=True)
-			X_test.to_csv(output_files[f'X_test_fold_{fold}'].path, index=True)
-			Y_test.to_csv(output_files[f'Y_test_fold_{fold}'].path, index=True)
 
 
 
-class timeBasedSplit(OneToOneTask):
-	def requires(self):
-		return [File(file=f) for f in self.input_file]
-	def output(self):
-		output_files = {}
-		file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
-		for fold in range(1, 6):  # 5 folds
-			output_files[f'X_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_train_fold_{fold}.csv"))
-			output_files[f'Y_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_train_fold_{fold}.csv"))
-			output_files[f'X_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_test_fold_{fold}.csv"))
-			output_files[f'Y_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_test_fold_{fold}.csv"))
-		return output_files
-	def run(self):
-		target_column = self.params['target_column']
-		df = pd.read_csv(self.input()[0].path, index_col="Datetime", parse_dates=True)
 
-        # Sort the dataset by time
-		df = df.sort_index()
-		
-		chunk_size = len(df) // 5
-		indices = np.arange(len(df))
-		chunks = [indices[i * chunk_size: (i + 1) * chunk_size] for i in range(4)]
-		chunks.append(indices[4 * chunk_size:])  # Add the remaining rows to the last chunk
-		for fold in range(1, 6):
-			test_indices = chunks[fold - 1]
-			train_indices = np.concatenate([chunks[i] for i in range(5) if i != (fold - 1)])
-			train_dates = df.index[train_indices]
-			test_dates = df.index[test_indices]
-			strat_train_set = df.loc[train_dates]
-			strat_test_set = df.loc[test_dates]
-			X_train = strat_train_set.drop(columns=[target_column])
-			Y_train = strat_train_set[target_column]
-			X_test = strat_test_set.drop(columns=[target_column])
-			Y_test = strat_test_set[target_column]
-			output_files = self.output()
-			X_train.to_csv(output_files[f'X_train_fold_{fold}'].path, index=True)
-			Y_train.to_csv(output_files[f'Y_train_fold_{fold}'].path, index=True)
-			X_test.to_csv(output_files[f'X_test_fold_{fold}'].path, index=True)
-			Y_test.to_csv(output_files[f'Y_test_fold_{fold}'].path, index=True)
-
-
-
-class timeSeriesSplit(OneToOneTask):
-    def requires(self):
-        return [File(file=f) for f in self.input_file]
-    
-    def output(self):
-        output_files = {}
-        file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
-        for fold in range(1, 6):  # 5 folds
-            output_files[f'X_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_train_fold_{fold}.csv"))
-            output_files[f'Y_train_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_train_fold_{fold}.csv"))
-            output_files[f'X_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_X_test_fold_{fold}.csv"))
-            output_files[f'Y_test_fold_{fold}'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_Y_test_fold_{fold}.csv"))
-        return output_files
-
-    def run(self):
-        target_column = self.params['target_column']
-        df = pd.read_csv(self.input()[0].path, index_col="Datetime", parse_dates=True)
-
-        # Sort the dataset by time
-        df = df.sort_index()
-
-        # TimeSeriesSplit for continuous time-based splits
-        tscv = TimeSeriesSplit(n_splits=5)
-
-        for fold, (train_index, test_index) in enumerate(tscv.split(df), start=1):
-            train_dates = df.index[train_index]
-            test_dates = df.index[test_index]
-            
-            strat_train_set = df.loc[train_dates]
-            strat_test_set = df.loc[test_dates]
-            
-            X_train = strat_train_set.drop(columns=[target_column])
-            Y_train = strat_train_set[target_column]
-            X_test = strat_test_set.drop(columns=[target_column])
-            Y_test = strat_test_set[target_column]
-            
-            output_files = self.output()
-            
-            # Save the train and test sets for the current fold
-            X_train.to_csv(output_files[f'X_train_fold_{fold}'].path, index=True)
-            Y_train.to_csv(output_files[f'Y_train_fold_{fold}'].path, index=True)
-            X_test.to_csv(output_files[f'X_test_fold_{fold}'].path, index=True)
-            Y_test.to_csv(output_files[f'Y_test_fold_{fold}'].path, index=True)
 
 
 
@@ -227,7 +102,7 @@ class lstm(OneToOneTask):
 			model = self.build_lstm_model(dimension1, dimension2)
 			model.fit(X_train, Y_train,
                    epochs=10,
-                  batch_size=512, #
+                  batch_size=512, 
                   callbacks=[tfdocs.modeling.EpochDots()])
 			predictions = model.predict(X_test)
 			predicted_data = pd.Series(predictions.ravel(), index=index)
@@ -249,7 +124,7 @@ class lstm(OneToOneTask):
 		mlp1 = tf.keras.layers.Dense(15, activation="sigmoid")
 		mlp2 = tf.keras.layers.Dense(15, activation="sigmoid")
 		mlp3 = tf.keras.layers.Dense(1, activation="sigmoid")
-		dropout = tf.keras.layers.Dropout(0.2, noise_shape=None) #
+		dropout = tf.keras.layers.Dropout(0.2, noise_shape=None) 
 		inputs = keras.Input(shape=( dimension1,dimension2))
 		x0=lstm1(inputs)
 		x1 = lstm2(x0)
@@ -274,7 +149,7 @@ class lstm(OneToOneTask):
 		num_samples = len(features) - timesteps
 		X_test = np.array([features[i:i + timesteps, :] for i in range(num_samples)])
 		Y_test = target[timesteps:]
-		idx_test = index[timesteps:] if index is not None else None  # Align index with Y_test
+		idx_test = index[timesteps:] if index is not None else None  
 		return X_test, Y_test, idx_test
 
 class randomforest(OneToOneTask):
@@ -332,7 +207,7 @@ class randomforest(OneToOneTask):
 			predicted_data = pd.Series(prediction, index=dataframes['Y_test'].index)
 			predicted_df = pd.DataFrame({'Predicted': predicted_data,'Probability': probabilities.ravel()})
 
-            # Save predicted and expected output for the current fold
+            
 			output_files = self.output()
 			predicted_df.to_csv(output_files[f'{predicted}_fold_{fold}'].path, index=True)
 			dataframes['Y_test'].to_csv(output_files[f'{expected}_fold_{fold}'].path, index=True)	
@@ -400,6 +275,7 @@ class FullyConnectedNN(OneToOneTask):
 
 		
 
+"""
 
 class arima(OneToOneTask):
 	def requires(self):
@@ -451,10 +327,11 @@ class arima(OneToOneTask):
 			predicted_data = pd.Series(prediction.values, index=dataframes['Y_test'].index)
 			predicted_df = pd.DataFrame(predicted_data, columns=['Predicted'])
 
-            # Save predicted and expected output for the current fold
+            
 			output_files = self.output()
 			predicted_df.to_csv(output_files[f'{predicted}_fold_{fold}'].path, index=True)
 			dataframes['Y_test'].to_csv(output_files[f'{expected}_fold_{fold}'].path, index=True)		
+"""
 class evaluation(OneToOneTask):
 	def requires(self):
 		return [File(file=f) for f in self.input_file]
@@ -526,25 +403,6 @@ class evaluation(OneToOneTask):
 		eval_df = pd.DataFrame(all_metrics)
 		eval_df.to_csv(self.output()[f'{eval}'].path, index = False)
 	
-class divideDatasetIntoModes(OneToOneTask):
-	def requires(self):
-		return [File(file=f) for f in self.input_file]
-
-	def output(self):
-			output_files = {}
-			file_base = os.path.splitext(os.path.basename(self.input_file[0]))[0]
-			output_files[f'heating_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_heating_mode.csv"))
-			output_files[f'cooling_mode'] = luigi.LocalTarget(os.path.join(self.output_file[0], f"{file_base}_cooling_mode.csv"))
-			return output_files
-	def run(self):
-		print("Inside dividing dataset")
-		df = pd.read_csv(self.input()[0].path, index_col="Datetime", parse_dates=True)
-		cooling_mode = df[(df['AHU: Outdoor Air Temperature'] >= df['AHU: Supply Air Temperature'])]
-		heating_mode = df[(df['AHU: Outdoor Air Temperature'] < df['AHU: Supply Air Temperature'])]
-
-		output_files = self.output()
-		cooling_mode.to_csv(output_files[f'cooling_mode'].path, index=True)
-		heating_mode.to_csv(output_files[f'heating_mode'].path, index=True)
 
 
 
@@ -556,27 +414,19 @@ class ClassificationPipeline(luigi.WrapperTask):
 	output_dir = luigi.Parameter()
 	config = luigi.Parameter() 
 	tasks = {
-		'stratified_split': stratifiedSplit,
-		'arima': arima,
+		#'arima': arima,
 		'evaluation': evaluation,
-		'time_based_split' : timeBasedSplit,
-		'time_series_split' : timeSeriesSplit,
 		'lstm' : lstm,
 		'randomforest' : randomforest,
 		'fullyConnectedNN' : FullyConnectedNN,
-		'divide_dataset_into_modes': divideDatasetIntoModes
-
+		
 	}
 	task_mapping = {
-		'stratified_split': ['csv', 'csv'],
-		'arima' : ['csv', 'csv'],
+		#'arima' : ['csv', 'csv'],
 		'evaluation': ['csv', 'csv'],
-		'time_based_split': ['csv', 'csv'],
-		'time_series_split' : ['csv', 'csv'],
 		'lstm': ['csv', 'csv'],
 		'randomforest'  : ['csv', 'csv'],
 		'fullyConnectedNN': ['csv', 'csv'],
-		'divide_dataset_into_modes' : ['csv', 'csv']
 		
 	}
 	
@@ -585,22 +435,22 @@ class ClassificationPipeline(luigi.WrapperTask):
 		pipeline_config = config['pipeline']
 
 		for task in pipeline_config:
-			# Task Specifications
+			
 			task_type = task['task']
 			unique_id = task['id']
 			input_id = task['input_id']
 			params = task['parameters']
 			
-			# Input and Output Directories
+			
 			input_dir = self.input_dir if input_id == 'input' else os.path.join(self.output_dir, input_id)
 			output_dir = os.path.join(self.output_dir, unique_id)
 			
-			# Generating output tree 
+			
 			input_tree = self.get_directory_tree(input_dir)
 			for subdir in input_tree:
 				os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
 
-			# Input and output files
+			
 			input_format, output_format = self.get_io_format(task)
 			input_files = self.get_files(input_dir, input_format)
 			output_files = []
@@ -613,13 +463,13 @@ class ClassificationPipeline(luigi.WrapperTask):
 			mapping = list(zip(input_files, output_files))
 		
 
-			# Instantiating Tasks
+			
 			pending_tasks = []
 			if len(input_files) > 1:
 				pending_tasks.append(
                 self.tasks[task_type](
-                    input_file=input_files,  # Pass all input files
-                    output_file=output_files,  # Pass all output files
+                    input_file=input_files,  
+                    output_file=output_files,  
                     params=params
                 )
             )
@@ -629,8 +479,8 @@ class ClassificationPipeline(luigi.WrapperTask):
                     
 					pending_tasks.append(
                     self.tasks[task_type](
-                        input_file=[input_file],  # Wrap in a list
-                        output_file=[output_file],  # Wrap in a list
+                        input_file=[input_file],  
+                        output_file=[output_file],  
                         params=params
                     )
                 )	
