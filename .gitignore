@@ -5,3 +5,7 @@ classification_input_dir/
 classification_output_dir/
 clustering_input_dir/
 clustering_output_dir/
+multiclassification_input_dir/
+multiclassification_output_dir/
+brick_output_dir/
+brick_input_dir/
