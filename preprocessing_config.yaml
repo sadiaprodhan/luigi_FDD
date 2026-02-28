@@ -1,26 +1,19 @@
 name: Time Series Analysis Preprocessing
 description: Fault detection timeseries analysis preprocessing different datasets with different feature engineering
 pipeline:
-  - task: check_dataset
-    id: dataset 
+
+  - task: stratified_split
+    id: stratified_split
     input_id: input
     parameters: 
-      input_format: csv 
-      output_format: csv 
-  - task: attribute_adder
-    id: attributeaddr 
-    input_id: dataset   
-    parameters:
-      target_column: Fault Detection Ground Truth
-      test_number: 3
-  - task: imputer
-    id: impute
-    input_id: attributeaddr   
-    parameters:
-      strategy: median
-  
+      target_column: Label
+      mode: multiclass
+
   - task: one_hot_encoding
     id: ohe
-    input_id: impute
-    parameters: 
-      datetime_columns: ['year', 'month', 'day', 'hour']
+    input_id: stratified_split
+    parameters:
+
+
+
+  
