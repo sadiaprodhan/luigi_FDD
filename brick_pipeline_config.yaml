@@ -17,9 +17,9 @@ pipeline:
           "explainer_kind": auto
           "per_class_n": 1000
           "sample_method": top_conf
-          "model_stem": fullyConnectedNN
-          "pred_stem": predicted
-          xte_stem: SDAHU_FULL_M_CLASS_X_test
+          "model_stem": fullyConnectedNN # or randomforest
+          "pred_stem": predicted      #predicted files name
+          xte_stem: SDAHU_FULL_M_CLASS_X_test #test files name
 
 - task: TopKSensorsByFault
   id: sensors

@@ -18,7 +18,7 @@ pipeline:
 
   - task: evaluation
     id: eval
-    input_id: input
+    input_id: randomforest
     parameters: 
       eval_file_name: evaluation
       file_format: csv
