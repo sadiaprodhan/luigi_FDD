@@ -16,6 +16,7 @@ from rdflib import Graph, Namespace
 from rdflib.namespace import RDFS
 from statsmodels.tsa.arima.model import ARIMA
 import tensorflow as tf
+from scipy.stats import pointbiserialr
 from tensorflow import keras
 from tensorflow.keras import layers, models
 from tensorflow.keras.callbacks import EarlyStopping
@@ -24,6 +25,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import train_test_split
 
 import tensorflow_docs.modeling
 
@@ -57,7 +59,7 @@ class OneToOneTask(luigi.Task):
 
 	def get_output_format(self):
 		pass 
-
+'''
 def fit_beta_from_samples(x, eps=1e-6):
     x = np.asarray(x, float)
     x = x[np.isfinite(x)]
@@ -91,7 +93,7 @@ def _collect_fold_inputs(targets, fold, keys):
         missing = [k for k,v in dfs.items() if v is None]
         raise ValueError(f"Missing for fold {fold}: {missing}")
     return dfs
-
+'''
 
 
 
@@ -117,6 +119,9 @@ class ExplainSHAP(OneToOneTask):
 			outs[f"sampled_rows_fold_{fold}"] = luigi.LocalTarget(
                 os.path.join(outdir, f"sampled_rows_fold_{fold}.csv")
             )
+			outs[f"bg_{fold}"] = luigi.LocalTarget(
+                os.path.join(outdir, f"bg_{fold}.csv")
+            )
 		outs["brick_tree_json"] = luigi.LocalTarget(os.path.join(outdir, "brick_tree_json.json"))
 		outs["sig2comp_json"]   = luigi.LocalTarget(os.path.join(outdir, "sig2comp_json.json"))
 		return outs
@@ -134,7 +139,8 @@ class ExplainSHAP(OneToOneTask):
 		Xte = None
 		model_stem = self.params.get("model_stem", "model")        
 		pred_stem  = self.params.get("pred_stem", "predicted")     
-		xte_stem   = self.params.get("xte_stem", "X_test")    
+		xte_stem   = self.params.get("xte_stem", "X_test")
+		yte_stem   = self.params.get("yte_stem", "Y_test")    
 
 		for t in self.input():
 			base = os.path.splitext(os.path.basename(t.path))[0]
@@ -144,9 +150,11 @@ class ExplainSHAP(OneToOneTask):
 				pred_df = pd.read_csv(t.path, index_col="Datetime", parse_dates=True)
 			elif base == f"{xte_stem}_fold_{fold}":
 				Xte = pd.read_csv(t.path, index_col="Datetime", parse_dates=True)
+			elif base == f"{yte_stem}_fold_{fold}":
+				Yte = pd.read_csv(t.path, index_col="Datetime", parse_dates=True)	
 		if model_path is None or pred_df is None or Xte is None:
 			raise ValueError(f"ExplainSHAPMulticlassJoblib: missing inputs for fold {fold}")
-		return model_path, pred_df, Xte
+		return model_path, pred_df, Xte, Yte
 	def _predict_proba(self, model, X_df: pd.DataFrame) -> np.ndarray:
 		if hasattr(model, "predict_proba"):
 			proba = np.asarray(model.predict_proba(X_df))
@@ -271,16 +279,17 @@ class ExplainSHAP(OneToOneTask):
 		conf_thresh  = float(self.params.get("confidence_threshold", 0.80))  
 		bg_size      = int(self.params.get("bg_size", 200))
 		explainer_kind = self.params.get("explainer_kind", "auto").lower()  
-		max_bg = min(bg_size, 1000)
+		
 		
 		for fold in range(1, 6):
-			model_path, pred_df, Xte = self._find_inputs_for_fold(fold)
+			model_path, pred_df, Xte, Yte = self._find_inputs_for_fold(fold)
 			model = joblib.load(model_path)
 			if "Predicted" not in pred_df.columns:
 				raise ValueError("pred_df must contain a 'Predicted' column.")
 			
 			pred_df = pred_df.sort_index()
 			Xte = Xte.sort_index()
+			Yte = Yte.sort_index()
 			
 			pred_labels = pred_df["Predicted"].astype(str)
 			fault_mask = pred_labels != str(normal_label)
@@ -324,7 +333,11 @@ class ExplainSHAP(OneToOneTask):
 				continue
 
             
-			bg = Xte.sample(n=min(max_bg, len(Xte)), random_state=0)
+			#bg = Xte.sample(n=min(max_bg, len(Xte)), random_state=0)
+			bg, _, y_bg, _ = train_test_split(Xte,Yte,
+									   train_size=min(bg_size, len(Xte)),
+									   stratify=Yte,random_state=42
+)
 			
 			class_labels = self._get_class_labels(model, pred_df)
 			label_to_ix = {str(lbl): i for i, lbl in enumerate(class_labels)}
@@ -362,15 +375,24 @@ class ExplainSHAP(OneToOneTask):
 			shap_raw = pd.DataFrame(vals_faultsignal, index=Xsub.index, columns=Xsub.columns)
 			shap_raw["Predicted"] = pred_lab_sub
 			shap_raw["Prob_PredClass"] = prob_sub
-
-            
+			print(bg.index[:5])
+			print(y_bg.index[:5])
+			print(bg.index.equals(y_bg.index))
 			shap_grouped = self._group_shap_by_signal(shap_raw)
+			bg_df = bg.copy()
+			bg_df["Label"] =  y_bg.iloc[:, 0].values
+
 
             
 			self.output()[f"shap_raw_fold_{fold}"].makedirs()
+		
 			self.output()[f"shap_grouped_fold_{fold}"].makedirs()
+			self.output()[f"bg_{fold}"].makedirs()
+			
 			shap_raw.to_csv(self.output()[f"shap_raw_fold_{fold}"].path, index=True, index_label="Datetime")
 			shap_grouped.to_csv(self.output()[f"shap_grouped_fold_{fold}"].path, index=True, index_label="Datetime")
+			bg_df.to_csv(self.output()[f"bg_{fold}"].path, index=True, index_label="Datetime")
+
 
 class TopKSensorsByFault(OneToOneTask):
 	def requires(self):
@@ -671,6 +693,7 @@ class BuildBrickTree(OneToOneTask):
         
 		q_equips = """
         SELECT DISTINCT ?e ?t ?label WHERE {
+		
           ?e a ?t .
           FILTER(CONTAINS(STR(?t), "Brick#")) .
           OPTIONAL { ?e rdfs:label ?label . }
@@ -683,7 +706,7 @@ class BuildBrickTree(OneToOneTask):
 			nodes[e_id] = {
                 "id": e_id,                 # SHORT id
                 "uri": e_uri,               # full URI kept for traceability
-                "kind": "equipment",
+                "kind": tname,
                 "brick_type": tname,
                 "label": str(lab).strip() if lab else e_id,
             }
@@ -720,7 +743,7 @@ class BuildBrickTree(OneToOneTask):
 					nodes[pt_id] = {
                         "id": pt_id,         
                         "uri": pt_uri,       
-                        "kind": "point",
+                        "kind": ptype_name,
                         "brick_type": ptype_name,
                         "label": sig_label,
                     }
@@ -741,7 +764,163 @@ class BuildBrickTree(OneToOneTask):
 			dst = os.path.join(outdir, os.path.basename(t.path))
 			shutil.copy2(t.path, dst)
 
+class CorrelationAnalysisTopKSensors(OneToOneTask):
+	def requires(self):
+		return [File(file=f) for f in self.input_file]
 
+	def output(self):
+		outdir = self.output_file[0]
+		return {
+			"correlation_all": luigi.LocalTarget(os.path.join(outdir, "main_correlation_topk_merged_all.csv")),
+			"correlation_topk_summary": luigi.LocalTarget(os.path.join(outdir, "main_correlation_topk_merged_summary.csv"))
+		}
+
+	def _load_topk_sensors(self) -> pd.DataFrame:
+		use_time = bool(self.params.get("use_time_features", False))
+		target_name = "topk_sensors_by_fault_with_time.csv" if use_time else "topk_sensors_by_fault_no_time.csv"
+
+		for t in self.input():
+			if os.path.basename(t.path) == target_name:
+				df = pd.read_csv(t.path)
+				required = {"fault_class", "feature", "rank"}
+				missing = required - set(df.columns)
+				if missing:
+					raise ValueError(f"Top-k sensor file missing columns: {missing}")
+				return df
+
+		raise ValueError(f"CorrelationAnalysisTopKSensors: missing {target_name}")
+
+	def _load_all_test_folds(self):
+		xte_stem = self.params.get("xte_stem", "SDAHU_FULL_M_CLASS_X_test")
+		yte_stem = self.params.get("yte_stem", "SDAHU_FULL_M_CLASS_Y_test")
+
+		x_list = []
+		y_list = []
+
+		for fold in range(1, 6):
+			xdf = None
+			ydf = None
+
+			for t in self.input():
+				base = os.path.splitext(os.path.basename(t.path))[0]
+				if base == f"{xte_stem}_fold_{fold}":
+					xdf = pd.read_csv(t.path, index_col="Datetime", parse_dates=True)
+				elif base == f"{yte_stem}_fold_{fold}":
+					ydf = pd.read_csv(t.path, index_col="Datetime", parse_dates=True)
+
+			if xdf is None or ydf is None:
+				raise ValueError(f"Missing X_test or Y_test for fold {fold}")
+
+			x_list.append(xdf.sort_index())
+			y_list.append(ydf.sort_index())
+
+		x_all = pd.concat(x_list, axis=0)
+		y_all = pd.concat(y_list, axis=0)
+		return x_all, y_all
+
+	def _extract_label_series(self, ydf: pd.DataFrame) -> pd.Series:
+		label_col = self.params.get("label_column", None)
+
+		if label_col is not None:
+			if label_col not in ydf.columns:
+				raise ValueError(f"Label column '{label_col}' not found in Y dataframe columns {list(ydf.columns)}")
+			return ydf[label_col]
+
+		if ydf.shape[1] == 1:
+			return ydf.iloc[:, 0]
+
+		for candidate in ["Label"]:
+			if candidate in ydf.columns:
+				return ydf[candidate]
+
+		raise ValueError(
+			f"Could not determine label column from Y dataframe columns {list(ydf.columns)}. "
+			f"Set params['label_column'] explicitly."
+		)
+
+	def run(self):
+		top_k = int(self.params.get("top_k", 5))
+		normal_label = str(self.params.get("normal_label", "Unfaulted"))
+
+		topk_df = self._load_topk_sensors()
+		topk_df = topk_df[topk_df["rank"] <= top_k].copy()
+
+		x_all, y_all = self._load_all_test_folds()
+		y_series = self._extract_label_series(y_all).astype(str)
+
+		common_idx = x_all.index.intersection(y_series.index)
+		x_all = x_all.loc[common_idx].copy()
+		y_series = y_series.loc[common_idx].copy()
+
+		rows = []
+		print("X columns:", list(x_all.columns))
+		print("Y unique labels:", y_series.astype(str).unique())
+		print("Topk fault classes:", topk_df["fault_class"].astype(str).unique())
+		print("Topk features:", topk_df["feature"].astype(str).unique())
+		print("Topk rows:", len(topk_df))
+
+		for fault, g in topk_df.groupby("fault_class"):
+			fault = str(fault)
+			if fault == normal_label:
+				continue
+
+			sensors = [str(s) for s in g["feature"].tolist() if str(s) in x_all.columns]
+			if len(sensors) == 0:
+				continue
+
+			y_bin = (y_series == fault).astype(int)
+			print("FAULT:", fault)
+			print("Sensors found:", sensors)
+			print("Positive samples:", int(y_bin.sum()))
+
+			
+
+			for sensor in sensors:
+				x = pd.to_numeric(x_all[sensor], errors="coerce")
+				valid = x.notna() & y_bin.notna()
+				x_valid = x.loc[valid]
+				y_valid = y_bin.loc[valid]
+				print("FAULT:", fault, "| SENSOR:", sensor)
+				print("  valid rows:", len(x_valid))
+				print("  x unique:", x_valid.nunique())
+				print("  y unique:", y_valid.nunique())
+				print("  y counts:", y_valid.value_counts().to_dict())
+				if x_valid.nunique() <= 1:
+					print("  SKIP: x_valid constant")
+					continue
+				if y_valid.nunique() <= 1:
+					print("  SKIP: y_valid single class")
+					continue
+				try:
+					corr, pval = pointbiserialr(y_valid, x_valid)
+					print("  corr:", corr, "pval:", pval)
+				except Exception as e:
+					print("  SKIP: correlation failed:", repr(e))
+					continue
+				rows.append({
+					"fault_class": fault,
+					"feature": sensor,
+					"correlation": float(corr),
+					"abs_correlation": float(abs(corr)),
+					"p_value": float(pval),
+					"n_samples": int(valid.sum()),
+					"n_positive": int(y_valid.sum())
+					})
+				print("  APPENDED")
+		all_df = pd.DataFrame(rows)
+
+		if all_df.empty:
+			summary_df = pd.DataFrame(columns=[
+				"fault_class", "feature", "correlation", "abs_correlation",
+				"p_value", "n_samples", "n_positive", "rank_by_abs_correlation"
+			])
+		else:
+			all_df = all_df.sort_values(["fault_class", "abs_correlation"], ascending=[True, False]).reset_index(drop=True)
+			all_df["rank_by_abs_correlation"] = all_df.groupby("fault_class").cumcount() + 1
+			summary_df = all_df.copy()
+		print("Final rows written:", len(all_df))	
+		all_df.to_csv(self.output()["correlation_all"].path, index=False)
+		summary_df.to_csv(self.output()["correlation_topk_summary"].path, index=False)
 		
 class BrickPipeline(luigi.WrapperTask):	
 	input_dir = luigi.Parameter() 
@@ -751,14 +930,16 @@ class BrickPipeline(luigi.WrapperTask):
 		'BuildBrickTree': BuildBrickTree,
 		'ExplainSHAP': ExplainSHAP,
 		'TopKSensorsByFault':TopKSensorsByFault,
-		'TopComponentsByFaultFromTopSensors': TopComponentsByFaultFromTopSensors
+		'TopComponentsByFaultFromTopSensors': TopComponentsByFaultFromTopSensors,
+		'CorrelationAnalysisTopKSensors': CorrelationAnalysisTopKSensors
 
 	}
 	task_mapping = {
 		'BuildBrickTree':['any','any'],
 		'ExplainSHAP': ['any', 'any'],
 		'TopKSensorsByFault': ['any', 'any'],
-		'TopComponentsByFaultFromTopSensors': ['any', 'any']
+		'TopComponentsByFaultFromTopSensors': ['any', 'any'],
+		'CorrelationAnalysisTopKSensors' : ['any', 'any']
 		
 	}
 	
